@@ -1,0 +1,95 @@
+# Typecheck, lint and test both packages on every push and pull request.
+#
+# The server suite runs against a real Postgres service container rather than
+# mocks, because what is worth testing here is transactions, unique constraints
+# and concurrent writes -- a mock cannot tell you whether two simultaneous
+# checkouts oversell the last unit.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  server:
+    name: server — typecheck, lint, test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: shop
+          POSTGRES_PASSWORD: shop
+          POSTGRES_DB: shop_dev
+        ports: ['5432:5432']
+        # Without a health check the job races the container and the first
+        # migration fails with "connection refused" perhaps one run in five.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://shop:shop@localhost:5432/shop_dev?schema=public
+      TEST_DATABASE_URL: postgresql://shop:shop@localhost:5432/shop_test?schema=public
+      # Test-only values. Two distinct strings, because the app refuses to boot
+      # if the access and refresh secrets match.
+      JWT_ACCESS_SECRET: ci-access-secret-ci-access-secret-32chars
+      JWT_REFRESH_SECRET: ci-refresh-secret-ci-refresh-secret-32chars
+      NODE_ENV: test
+
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci
+
+      - name: Create the test database
+        run: PGPASSWORD=shop createdb -h localhost -U shop shop_test
+
+      - run: npx prisma generate
+
+      - name: Apply migrations to both databases
+        run: |
+          npx prisma migrate deploy
+          DATABASE_URL="$TEST_DATABASE_URL" npx prisma migrate deploy
+
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+
+  web:
+    name: web — typecheck, lint, test, build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      # `build` runs tsc -b first, so this covers the typecheck and proves the
+      # production bundle actually compiles -- not just that the types line up.
+      - run: npm run build

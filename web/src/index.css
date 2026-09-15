@@ -1,0 +1,203 @@
+@import 'tailwindcss';
+
+/* ===========================================================================
+   MERIDIAN & CO. — design tokens
+   ---------------------------------------------------------------------------
+   Direction: editorial mercantile. The reference points are printed goods
+   catalogues, not SaaS dashboards — warm paper ground, deep ink, one oxidised
+   orange that earns attention because nothing else competes for it.
+
+   Structure comes from hairline rules and generous space rather than cards
+   floating on shadows. Prices and quantities are set in tabular figures so
+   columns of numbers line up like a ledger.
+   ========================================================================= */
+
+@font-face {
+  font-family: 'Fraunces';
+  src: url('/fonts/fraunces-var.woff2') format('woff2-variations');
+  font-weight: 300 800;
+  font-display: swap;
+  /* Fraunces is a variable font with an optical-size axis; the range must be
+     declared or the browser clamps every size to the default and the display
+     type loses its contrast. */
+  font-variation-settings: 'opsz' 96;
+}
+
+@font-face {
+  font-family: 'Archivo';
+  src: url('/fonts/archivo-var.woff2') format('woff2-variations');
+  font-weight: 400 700;
+  font-display: swap;
+}
+
+@theme {
+  --font-display: 'Fraunces', 'Iowan Old Style', Georgia, serif;
+  --font-sans: 'Archivo', 'Helvetica Neue', Helvetica, sans-serif;
+
+  /* Paper: a warm off-white, not #fff. Pure white next to warm ink reads cold
+     and makes the photography look grey. */
+  --color-paper: #f7f3ec;
+  --color-paper-deep: #efe8dc;
+  --color-paper-edge: #e3d9c8;
+
+  /* Ink: near-black with a brown cast, so it sits on the paper rather than
+     punching a hole in it. */
+  --color-ink: #1c1815;
+  --color-ink-soft: #554c42;
+  --color-ink-faint: #8b8075;
+
+  /* The single accent. Oxidised orange — reads as a stamp or a wax seal. */
+  --color-rust: #b8410e;
+  --color-rust-deep: #8f3009;
+  --color-rust-wash: #f6e4d8;
+
+  --color-moss: #3f5a3a;
+  --color-moss-wash: #e5ebe1;
+
+  --radius-card: 2px;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings:
+      'kern' 1,
+      'liga' 1;
+    -webkit-font-smoothing: antialiased;
+    /* A faint paper grain, drawn rather than loaded. Two offset radial
+       gradients read as fibre at normal viewing distance and cost no request. */
+    background-image:
+      radial-gradient(circle at 20% 10%, rgba(184, 65, 14, 0.035) 0, transparent 45%),
+      radial-gradient(circle at 85% 80%, rgba(63, 90, 58, 0.035) 0, transparent 40%);
+    background-attachment: fixed;
+  }
+
+  /* Tabular figures everywhere a number can sit in a column. Proportional
+     digits make a price list look ragged and a quantity stepper jump width as
+     it counts past 9. */
+  .nums {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
+
+  /* Focus is visible and on-brand, never removed. Keyboard users are not an
+     edge case, and `outline: none` with nothing in its place is the single
+     most common accessibility regression in a styled form. */
+  :focus-visible {
+    outline: 2px solid var(--color-rust);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--color-rust);
+    color: var(--color-paper);
+  }
+}
+
+@layer components {
+  /* Letterspaced small-caps label — the typographic signature of the whole
+     interface. Used for eyebrows, field labels and table headers. */
+  .label-xs {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-ink-faint);
+  }
+
+  .rule {
+    border-color: var(--color-paper-edge);
+  }
+
+  /* Underline that grows from the left on hover. Cheap, CSS-only, and it gives
+     every link a shared personality without a JS animation library. */
+  .link-slide {
+    position: relative;
+    text-decoration: none;
+  }
+  .link-slide::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    bottom: -2px;
+    height: 1px;
+    width: 100%;
+    background: currentColor;
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .link-slide:hover::after,
+  .link-slide:focus-visible::after {
+    transform: scaleX(1);
+  }
+
+  /* Staggered page-load reveal. One orchestrated entrance beats a dozen
+     scattered micro-interactions, and `animation-delay` set inline per item
+     keeps it to pure CSS. */
+  .rise {
+    animation: rise 620ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .drawer-in {
+    animation: drawer-in 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes drawer-in {
+    from {
+      transform: translateX(100%);
+    }
+    to {
+      transform: none;
+    }
+  }
+
+  .fade-in {
+    animation: fade-in 240ms ease-out;
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  /* Respect the OS setting. Vestibular disorders are real and this is one
+     media query. */
+  @media (prefers-reduced-motion: reduce) {
+    .rise,
+    .drawer-in,
+    .fade-in {
+      animation: none !important;
+    }
+    .link-slide::after {
+      transition: none;
+    }
+  }
+}

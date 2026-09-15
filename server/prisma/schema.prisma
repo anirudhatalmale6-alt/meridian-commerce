@@ -1,0 +1,310 @@
+// Prisma schema for the commerce platform.
+//
+// Conventions used throughout:
+//  - All money is stored as INTEGER minor units (cents). Never floats: 0.1 + 0.2
+//    is not 0.3 in IEEE754 and an order total that is a cent off is a support ticket.
+//  - Every table that users can reach by id uses a cuid, not an incrementing int,
+//    so ids are not enumerable from the outside.
+//  - Deletions are restricted, not cascading, anywhere an order could lose its
+//    history. An order line keeps its own snapshot of title/sku/price so that
+//    editing a product tomorrow never rewrites what somebody paid yesterday.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  ADMIN
+}
+
+enum OrderStatus {
+  AWAITING_PAYMENT
+  PAYMENT_RECEIVED
+  PROCESSING
+  SHIPPED
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role     @default(CUSTOMER)
+  phone        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  addresses     Address[]
+  refreshTokens RefreshToken[]
+  cart          Cart?
+  orders        Order[]
+
+  @@index([createdAt])
+}
+
+// Refresh tokens are stored HASHED, never in plaintext. A stolen database dump
+// must not hand an attacker a set of working sessions. Rotation is enforced by
+// stamping revokedAt on the old row every time a new one is issued.
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  userAgent String?
+  ip        String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Address {
+  id         String  @id @default(cuid())
+  userId     String
+  label      String?
+  fullName   String
+  line1      String
+  line2      String?
+  city       String
+  region     String?
+  postalCode String
+  country    String  @db.Char(2)
+  phone      String?
+  isDefault  Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Category {
+  id       String  @id @default(cuid())
+  slug     String  @unique
+  name     String
+  parentId String?
+
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Category[] @relation("CategoryTree")
+  products Product[]
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  description String
+  brand       String?
+  categoryId  String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  category Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  images   ProductImage[]
+  options  ProductOption[]
+  variants ProductVariant[]
+
+  @@index([categoryId])
+  @@index([isActive])
+  @@index([createdAt])
+}
+
+model ProductImage {
+  id        String @id @default(cuid())
+  productId String
+  url       String
+  alt       String
+  position  Int    @default(0)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+// Options and values are modelled relationally rather than as a JSON blob so the
+// frontend can render a real variant picker (Size: S/M/L, Colour: Black/Sand)
+// and so "which variant is Size=M and Colour=Black" is a query, not a scan.
+model ProductOption {
+  id        String @id @default(cuid())
+  productId String
+  name      String
+  position  Int    @default(0)
+
+  product Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  values  ProductOptionValue[]
+
+  @@unique([productId, name])
+  @@index([productId])
+}
+
+model ProductOptionValue {
+  id       String @id @default(cuid())
+  optionId String
+  value    String
+  position Int    @default(0)
+
+  option   ProductOption        @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  variants VariantOptionValue[]
+
+  @@unique([optionId, value])
+  @@index([optionId])
+}
+
+model ProductVariant {
+  id         String   @id @default(cuid())
+  productId  String
+  sku        String   @unique
+  priceCents Int
+  // Optional "was" price so the UI can show a strikethrough without a second table.
+  compareAtCents Int?
+  stock      Int      @default(0)
+  weightGrams Int?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  product      Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  optionValues VariantOptionValue[]
+  cartItems    CartItem[]
+  orderItems   OrderItem[]
+
+  @@index([productId])
+  @@index([priceCents])
+}
+
+model VariantOptionValue {
+  variantId     String
+  optionValueId String
+
+  variant     ProductVariant     @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  optionValue ProductOptionValue @relation(fields: [optionValueId], references: [id], onDelete: Cascade)
+
+  @@id([variantId, optionValueId])
+  @@index([optionValueId])
+}
+
+// A cart belongs to EITHER a signed-in user or an anonymous session id, never
+// both at once. On login the guest cart is merged into the user cart and the
+// guest row is deleted -- see cart.service.ts, which is where most naive
+// implementations silently drop the guest's items.
+model Cart {
+  id        String   @id @default(cuid())
+  userId    String?  @unique
+  sessionId String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items CartItem[]
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  cartId    String
+  variantId String
+  quantity  Int
+  addedAt   DateTime @default(now())
+
+  cart    Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  @@unique([cartId, variantId])
+  @@index([cartId])
+}
+
+model Order {
+  id          String        @id @default(cuid())
+  orderNumber String        @unique
+  userId      String
+  status      OrderStatus   @default(AWAITING_PAYMENT)
+  method      PaymentMethod @default(BANK_TRANSFER)
+
+  // Payment reference the shopper quotes on the bank transfer. Unique so two
+  // orders can never collide and have an admin mark the wrong one paid.
+  paymentReference String  @unique
+  paidAt           DateTime?
+
+  subtotalCents Int
+  shippingCents Int @default(0)
+  taxCents      Int @default(0)
+  totalCents    Int
+  currency      String @db.Char(3) @default("USD")
+
+  // Address is SNAPSHOTTED onto the order. If the customer edits their address
+  // book next month, this order still says where it was actually shipped.
+  shipFullName   String
+  shipLine1      String
+  shipLine2      String?
+  shipCity       String
+  shipRegion     String?
+  shipPostalCode String
+  shipCountry    String  @db.Char(2)
+  shipPhone      String?
+
+  customerNote String?
+  adminNote    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  items  OrderItem[]
+  events OrderStatusEvent[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  variantId String?
+
+  // Snapshot fields: what the customer actually bought, at the price they
+  // actually paid. variantId is nullable and SetNull on delete so purging a
+  // product never destroys order history.
+  productTitle String
+  variantLabel String
+  sku          String
+  unitCents    Int
+  quantity     Int
+  lineCents    Int
+
+  order   Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+}
+
+// Append-only audit trail of status transitions. Who moved this order to
+// PAYMENT_RECEIVED, and when, is a question that gets asked in every dispute.
+model OrderStatusEvent {
+  id        String       @id @default(cuid())
+  orderId   String
+  from      OrderStatus?
+  to        OrderStatus
+  actorId   String?
+  note      String?
+  createdAt DateTime     @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}

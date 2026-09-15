@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment -- NEVER commit these. .env.example is the committed template.
+.env
+.env.*
+!.env.example
+
+# Local Postgres cluster used for development on this machine
+pgdata/
+
+# Logs and coverage
+*.log
+npm-debug.log*
+coverage/
+.nyc_output/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Playwright / test artefacts
+test-results/
+playwright-report/
